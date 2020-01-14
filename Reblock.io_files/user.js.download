@@ -1,0 +1,265 @@
+$(window).on('coinbaseReady',function(){
+
+	Promise.all([
+			globContractRef['TokenContract'].methods.balanceOf(globCoinbase).call(),
+			globContractRef['TokenContract'].methods.decimals().call(),
+			globContractRef['PropertyTransactionContract'].methods.propertyRegistrationFee().call(),
+			globContractRef['PropertyTransactionContract'].methods.propertyRegistrationFeeCollectionAddress().call(),
+			globContractRef['PropertyTransactionContract'].methods.propertyRentRegistrationFee().call(),
+			globContractRef['PropertyTransactionContract'].methods.propertyRentRegistrationFeeCollectionAddress().call(),
+			globContractRef['LandDeedTransactionContract'].methods.landRegistrationFee().call(),
+			globContractRef['LandDeedTransactionContract'].methods.landRegistrationFeeCollectionAddress().call(),
+			globContractRef['LandDeedTransactionContract'].methods.deedRegistrationFee().call(),
+			globContractRef['LandDeedTransactionContract'].methods.deedRegistrationFeeCollectionAddress().call()
+		])
+		.then(async ([_tokenBalance,_tokenDecimals,_propertyRegistrationFee,_propertyRegistrationFeeCollectionAddress,_propertyRentRegistrationFee,_propertyRentRegistrationFeeCollectionAddress,_landRegistrationFee,_landRegistrationFeeCollectionAddress,_deedRegistrationFee,_deedRegistrationFeeCollectionAddress])=>{
+			var tokens = toEtherCustom(_tokenBalance,_tokenDecimals);
+			var propRegTokenFee = toEtherCustom(_propertyRegistrationFee,tokenDecimal);
+			var propRentTokenFee = toEtherCustom(_propertyRentRegistrationFee,tokenDecimal);
+			var landRegTokenFee = toEtherCustom(_landRegistrationFee,tokenDecimal);
+
+			$("#myTokenBalance").html(tokens);
+			$("#blockchainPropertyRegistrationFee").html(propRegTokenFee+' '+tokenSymbol);
+			$("#blockchainLandRegistrationFee").html(landRegTokenFee);
+			$("#blockchainPropertyRentRegistrationFee").html(propRentTokenFee+' '+tokenSymbol);
+
+			// var currentRegistrationType = $("#registrationFee").attr('data-current_blockchain_registration_type');
+			// if(currentRegistrationType == 'property_registration'){
+			// 	if(tokenAllowance >= propRegTokenFee){
+			// 		$("#registrationFee").hide();
+			// 	}
+			// }
+			// else if(currentRegistrationType == 'land_registration'){
+			// 	if(tokenAllowance >= propRentTokenFee){
+			// 		$("#registrationFee").hide();		
+			// 	}
+			// }
+			// else if(currentRegistrationType == 'property_rent_registration'){
+			// 	if(tokenAllowance >= landRegTokenFee){
+			// 		$("#registrationFee").hide();	
+			// 	}
+			// }
+
+		});	
+
+	$("#eth_amount").on("change",function(){
+		var expectedToken = $(this).val() * ethExchangeRate;
+
+        $("#expectedTokenUsingETH").html(expectedToken);
+		$("#btn_buy_token_by_eth").attr('data-expected_tokens',expectedToken);
+	});	
+
+	$("#usd_amount").on("change",function(){
+		var expectedToken = $(this).val() * fiatExchangeRate;
+
+		$("#expectedTokenUsingUSD").html(expectedToken);
+		$("#token_symbol").val(tokenSymbol);
+	});	
+
+
+
+});
+
+
+function buyTokenWithEth(ref){
+
+    $("#frm_token_purchase").parsley().validate();
+
+    if($("#frm_token_purchase").parsley().isValid()==false){
+        // swal("Error","Please enter ETH Amount","error");
+        return false;
+    }
+    else{
+        	var ethAmount = $("#eth_amount").val();
+            var expectedToken = $(ref).attr('data-expected_tokens');
+
+        	ethAmount = toWei(ethAmount);
+
+        	globContractRef['TokenSale'].methods.purchase()
+        	.send({from:globCoinbase,to:globContractRef['TokenSale']._address,value:ethAmount})
+        	.on('transactionHash',function(hash)
+            {
+                updateTokenPurchaseData(hash,expectedToken,toEther(ethAmount));
+
+                 handleTransactionResponse(hash,'USER_TOKEN_PURCHASE',globContractRef['TokenSale']._address,globContractRef['TokenSale'].currentProvider.networkVersion);
+            })
+            .on('receipt',function(receipt)
+            {
+                receiptMessage = "Token Purchase Successfully";
+                handleTransactionReceipt(receipt,receiptMessage);
+            })
+            .on('error',function(error)
+            {
+                handleGenericError(error.message);
+                return;   
+            }); 
+    }        
+}
+
+function buyTokenWithUsd(ref){
+	var form_data = $("#frm_token_purchase").serialize();
+	showProcessingOverlay();
+	$.ajax({
+		url: SITE_URL+'/buy_token_paypal',
+		type:'POST',
+		data: form_data,
+		dataType:'json',
+		success: function(response){
+			if(response.status == "SUCCESS"){
+				window.location = response.redirect_url;
+			}
+			else{
+				swal('Error',response.description,'error');
+			}
+		}
+	});
+}
+
+
+function updateTokenPurchaseData(hash,amount,tokens){
+    $.ajax({
+        url: SITE_URL+'/update_token_history',
+        type:'POST',
+        data:{
+            _token:csrf_token,
+            hash:hash,
+            amount:amount,
+            tokens:tokens
+        },
+        dataType:'json',
+        success:function(response){
+            if(response.status=='SUCCESS'){
+
+            }    
+
+        }
+    });
+}
+
+function submitRegistrationFee(id,type,user_role){
+	if(tokenContractPaused)
+    {
+        errorAlert("Tokens cannot be Approved at the moment");
+        /*sweetAlert("Error", "Tokens cannot be Approved at the moment", "error");*/
+        return;
+    }
+
+    var url;
+    if(type=='property_registration' || type=='land_registration')
+    {
+    	url = SITE_URL+'/property_purchase/upload_fee_status';
+    }
+    else if(type=='property_rent_registration')
+    {
+    	url = SITE_URL+'/property_rent/upload_fee_status'
+    }
+
+    $.ajax({
+    	url:url,
+    	type:'POST',
+    	data:{_token:csrf_token,id:id,user_role:user_role},
+    	dataType:'json',
+    	success: function(response){
+    		hideProcessingOverlay();
+            if(response.status == 'SUCCESS'){
+                // giveTokenApproval(type);
+                window.location.reload();
+    		}
+    		else{
+    			swal('Error','Error while updating data','error');
+    		}
+    	}
+    }); 
+}
+
+function giveTokenApproval(id,type,user_role){
+
+	var registrationFee;
+	var registrationFeeAddress;
+    var transactionType;
+    var table_name;
+    var col_name;
+
+    if(user_role == 'seller' || user_role == 'agent' || user_role == 'broker'){
+    	col_name = 'seller_fee_send_tx_hash';
+    }
+    else if(user_role == 'buyer' || user_role == 'renter'){
+    	col_name = 'buyer_fee_send_tx_hash';
+    }
+
+    if(type=='property_registration'){
+    	registrationFee = propertyRegistrationFee;
+    	registrationFeeAddress = propertyRegistrationFeeCollectionAddress;
+    	transactionType = 'USER_PROPERTY_REGISTRATION';
+    	table_name = 'property_buy';
+    }
+    else if(type=='land_registration'){
+    	registrationFee = landRegistrationFee;
+    	registrationFeeAddress = landRegistrationFeeCollectionAddress;
+    	transactionType = 'USER_LAND_REGISTRATION';
+    	table_name = 'property_buy';
+    }
+    else if(type=='property_rent_registration'){
+    	registrationFee = propertyRentRegistrationFee;
+    	registrationFeeAddress = propertyRentRegistrationFeeCollectionAddress;
+    	transactionType = 'USER_PROPERTY_RENT_REGISTRATION';
+    	table_name = 'property_rent';
+    }
+
+
+    // console.log(id,user_role,col_name,table_name); return;
+    if(checkUserSufficentTokenBalance(registrationFee)==true)
+    { 
+        globContractRef['TokenContract'].methods.transfer(registrationFeeAddress,registrationFee)
+        .send({from:globCoinbase,to:globContractRef['TokenContract']._address})
+        .on('transactionHash',function(hash)
+        {	
+        	txHashUpdateInDatabase(table_name,col_name,id,hash);
+            handleTransactionResponse(hash,transactionType,globContractRef['TokenContract']._address,globContractRef['TokenContract'].currentProvider.networkVersion);
+        })
+        .on('receipt',function(receipt)
+        {
+          receiptMessage = "Blockchain Registration Fee Paid Successfully.";
+          // handleTransactionReceipt(receipt,receiptMessage)
+          submitRegistrationFee(id,type,user_role);
+        })
+        .on('error',function(error)
+        {
+          handleGenericError(error.message);
+              return;   
+        });
+    }    
+}
+
+
+/*function update_user(_user_address,
+                      _name,
+                      _profileHash,
+                      form_data,
+                      _dataId)
+{
+
+    globContractRef['UserContract'].methods.updateUser(_user_address,
+                                                        _name,
+                                                        _profileHash)
+    .send({from:globCoinbase,to:globContractRef['UserContract']._address})
+    .on('transactionHash',function(hash)
+    {
+
+        txHashUpdateInDatabase("users","user_tx_hash",_dataId,hash);
+
+        handleTransactionResponse(hash,'UPDATE_USER_DATA',globContractRef['UserContract']._address,globContractRef['UserContract'].currentProvider.networkVersion);
+    })
+    .on('receipt',function(receipt)
+    {  
+        // Back call again to common.js update_kyc_status function
+        var _user_address = receipt.events.DeedDetailsAdded.returnValues.deedDetailAddress;
+
+        update_deed_approve_status(_dataId,register_deed_blockchain_id);
+    })
+    .on('error',function(error)
+    {
+        handleGenericError(error.message);
+        return;   
+    }); 
+}*/

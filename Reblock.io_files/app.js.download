@@ -1,0 +1,450 @@
+var globAdminAddress = "0xab0874cB61D83F6B67Dc08141568868102233bef";
+var globTokenContract = false;
+var globCoinbase = false;	
+var globBalance = false;	
+var currentNetwork = false;
+var activeNetwork = 'rinkeby'; /*main,ropsten,kovan,rinkeby,*/
+var isMetamaskAvailable = true;
+
+var globContractDetails = {};
+	var globContractRef = {};
+	var globContractRefAttributes = {};
+	var globContractRefByAddress = {};
+
+	window.addEventListener('load', function() {    
+
+		/*
+		* Initialize Provider
+		*/
+		if (typeof web3 !== 'undefined') 
+		{
+		  web3 = new Web3(web3.currentProvider);
+		//   web3 = new Web3(new Web3.providers.HttpProvider("https://rinkeby.infura.io/8U0AE4DUGSh8lVO3zmma"));
+		} else {
+		  // set the provider you want from Web3.providers
+		  web3 = new Web3(new Web3.providers.HttpProvider("http://localhost:8545"));
+		}
+		
+		/*web3 = new Web3(new Web3.providers.HttpProvider("https://rinkeby.infura.io/8U0AE4DUGSh8lVO3zmma"));*/
+		
+		getCurrentAccountAddress((address)=>{
+			// console.log("admin.php"+address)
+			/*  To Restrict User in Admin Section */
+			var currentPath = window.location.pathname;
+			var tmpStack = currentPath.split("/");
+			var currentPanel = tmpStack.pop();
+
+
+			if(currentPanel == "admin.php")
+			{
+				// if(address != globAdminAddress){
+				// 	window.location = "index.php";
+				// }
+			}
+
+		});	
+		
+				
+		$.ajax({
+			url: $("meta[name=site_url]").attr('content')+'/api/get_contract_details',
+			type:'get',
+			dataType:'json',
+			success:function(contractDetails)
+			{
+				/* Check if on Rinkeby Network  */	
+
+				// console.log(contractDetails);
+				// return;
+
+				Promise.all([
+					web3.eth.net.getId()
+				])
+				.then( async ([currentNetwork])=>{
+
+					for(var tmpIndex in contractDetails)
+					{
+						contractDetails[tmpIndex].contract_abi = JSON.parse(contractDetails[tmpIndex].contract_abi);
+
+						globContractRef[tmpIndex] = 	await initContract(contractDetails[tmpIndex].contract_abi,contractDetails[tmpIndex].contract_address);
+
+						globContractRefByAddress[contractDetails[tmpIndex].contract_address] = globContractRef[contractDetails[tmpIndex].contract_address];
+						globContractDetails[contractDetails[tmpIndex].contract_name] = contractDetails[tmpIndex];
+
+					}
+
+					// if(USER_LOGGED_IN==true){
+					// 	// updateLoginAccountStatus();
+					// }	
+
+					$(window).trigger("contractReady");
+				});
+			}
+		});
+		
+
+		if(web3.currentProvider.publicConfigStore == undefined){
+			isMetamaskAvailable = false;
+			errorAlert('Please add Metamask extention in this browser.<br/> <a href="https://metamask.io/" target="_blank">Click Here</a> to get Metamask Extention.');
+			/*sweetAlert('Error', 'Please add Metamask extention in this browser.<br/> <a href="https://metamask.io/" target="_blank">Click Here</a> to get Metamask Extention.', 'error');*/
+			return;	
+		}else{
+			web3.currentProvider.publicConfigStore.on('update',(data)=>{
+				if(globCoinbase==false || globCoinbase==null){
+					checkCurrentNetwork();
+				}
+			});
+		}	
+
+	});	
+
+
+
+function initContract(abi,contractAddress)
+{
+	return new web3.eth.Contract(abi,contractAddress);
+}
+
+
+
+function getCurrentAccountAddress(callback){
+		callback = callback || false;
+
+		web3.eth.getCoinbase()
+		.then((_coinbase)=>{
+			// console.log(_coinbase);
+			callback(_coinbase);
+		})
+		.catch((err)=>{
+			if(callback){
+				callback(0);
+			}
+		})
+	}
+
+
+function updateLoginAccountStatus(){
+
+		web3.eth.getAccounts(function(err,accounts){
+
+			if(err){
+				console.log('An error occurred '+ err);
+			}else if(accounts.length == 0){
+				
+				try{
+					errorAlert("ETH wallet address compulsory for Blockchain Transaction. System will take your ETH address from metamask. <br/> Please login to Metamask.","Ok","METAMASK_OPEN");
+
+					/*swal({
+					  title: "Note!",
+					  text: "ETH wallet address compulsory for Blockchain Transaction. <br/> System will take your ETH address from metamask. <br/> Please login to Metamask.",
+					  type: "warning",
+					  confirmButtonText: "OK"
+					},
+					function(isConfirm){
+					  if (isConfirm) {
+					   window.ethereum.enable();
+					  }
+					});	*/
+				}
+				catch(e){
+					errorAlert("Please login to MetaMask..!");
+					/*sweetAlert('Error', 'Please login to MetaMask..!', 'error');*/
+					$("#currentUserAddress").html("0x0000000000000000000000000000000000000000");
+				}
+					
+			}else{
+				checkCurrentNetwork();
+			}
+		});
+	}
+
+
+	/*function check current active network and do next actions accordingly*/
+	function checkCurrentNetwork(){
+		web3.eth.net.getNetworkType()
+		.then((result)=>{
+			// console.log(result);
+			if(result==activeNetwork)
+			{
+				initAccountDetails();
+			}else{
+				errorAlert('Please select '+activeNetwork+' Network.');
+				/*sweetAlert('Error', 'Please select '+activeNetwork+' Network.' , 'error');*/
+				$("#currentUserAddress").html("0x0000000000000000000000000000000000000000");
+			}
+		});
+	}
+
+
+	function initAccountDetails(prefillAddress){
+
+		prefillAddress = prefillAddress || false;
+
+		/*
+		* Get Current wallet account address
+		*/
+		if(prefillAddress)
+		{
+			
+			if(prefillAddress==0){
+				return false;
+			}			
+			
+			globCoinbase = prefillAddress;
+			// console.log(globCoinbase);				
+			
+			// checkST20Wallet(globCoinbase);
+			$("#currentUserAddress").html(globCoinbase);	
+			
+			$("#userAddressQr").attr("src","https://chart.googleapis.com/chart?cht=qr&chld=H%7C1&chs=200x200&chl="+globCoinbase);	
+			$("#currentUserAddress").attr('title',globCoinbase);
+			$("#metaAddress").html(globCoinbase);
+			// console.log('yes')
+			// return;
+
+			$(window).trigger("coinbaseReady");	
+				
+			
+			
+			web3.eth.getBalance(prefillAddress, (err, balance) => {
+				balance = toEther(balance);
+				balance = parseFloat(balance).toFixed(3);
+				$("#userETHBalance").html(balance+" ETH");
+			});			
+		}
+		else
+		{
+			getCurrentAccountAddress((address)=>{
+			
+				if(address==0){
+					return false;
+				}
+				
+				globCoinbase = address;				
+	
+				// checkST20Wallet(globCoinbase);
+				// $("#currentUserAddress").html(globCoinbase);	
+		
+				// $("#userAddressQr").attr("src","https://chart.googleapis.com/chart?cht=qr&chld=H%7C1&chs=200x200&chl="+globCoinbase);	
+				// $("#currentUserAddress").attr('title',globCoinbase);
+				// $("#metaAddress").html(globCoinbase);
+				$(window).trigger("coinbaseReady");		
+	
+				web3.eth.getBalance(address, (err, balance) => {
+					balance = toEther(balance);
+					balance = parseFloat(balance).toFixed(3);
+					// console.log(balance);
+					$("#userETHBalance").html(balance+" ETH");
+				});
+				
+			});
+		}
+	}
+
+	function dateToUnixTimestamp(_date){
+		// var tmpDate = _date.trim().split("-");
+      	// tmpDate = tmpDate[1]+"/"+tmpDate[0]+"/"+tmpDate[2]; 
+
+      	var unixTimestamp = new Date(_date).getTime() / 1000;
+      	return unixTimestamp;
+	}
+
+
+	function handleTransactionResponse(txHash,action,recipient_address,network_id)
+	{
+		
+		var network_id = network_id || null;
+
+		// var txLink = getEtherScanUrl()+"/tx/" + txHash ;
+		var txLink = "https://rinkeby.etherscan.io/tx/" + txHash ;
+	    var txLinkHref = "<a target='_blank' href='"+txLink+"'> Click here for Transaction Status </a>" ;
+
+	    swal({
+			  title: "Success",
+			  text: "Please Check Transaction Status here :  "+txLinkHref,
+			  type: "success",
+			  confirmButtonText: "OK"
+			},
+			function(isConfirm){
+			  if (isConfirm) {
+			    showProcessingOverlay();
+			  }
+			});
+
+	    saveRawTransactionData(txHash,action,recipient_address,network_id);
+
+	    $("#linkOngoingTransaction").html(txLinkHref);
+	    $("#divOngoingTransaction").fadeIn();
+	    $(".linkOngoingTransactions").html(txLinkHref);
+	    $(".divOngoingTransactions").show();
+	    /*scroll to top*/
+	    $('html, body').animate({ scrollTop: 0 }, 'slow', function () {});
+	}
+
+	function handleTransactionReceipt(receipt,finalMessage)
+	{
+
+		$("#linkOngoingTransaction").html("");
+	    $("#divOngoingTransaction").fadeOut();
+
+	    $(".linkOngoingTransactions").html("");
+	    $(".divOngoingTransactions").hide();
+
+	    // sweetAlert("Success", "Token Purchase Complete ", "success");
+	    errorAlert(finalMessage);
+	    /*sweetAlert("Success", finalMessage, "success");*/
+	    window.location.reload();
+	}
+
+	function handleGenericError(error_message)
+	{
+	    if(error_message.includes("MetaMask Tx Signature"))
+	    {
+	    	errorAlert("Transaction Refused ");
+	        /*sweetAlert("Error", "Transaction Refused ", "error");*/
+	    }
+	    else
+	    {
+	        // sweetAlert("Error", "Error Occured, Please Try Again , if problem persist get in touch with us. ", "error");
+	        errorAlert(error_message);
+	        /*sweetAlert("Error", error_message, "error");*/
+	    }
+
+	}	
+
+
+	/*---------------------------------------------------------------
+	|store raw transaction data into database
+	---------------------------------------------------------------*/
+	function saveRawTransactionData(txHash,process_action,recipient_address,network_id){
+		$.ajax({
+			url:SITE_URL+'/save_raw_data',
+			type:'POST',
+			data:{_token:csrf_token,txHash:txHash,process_action:process_action,recipient_address:recipient_address,globAdminAddress:globAdminAddress,network_id:network_id},
+			dataType:'json',
+			success:function(response){
+				if(response.status=='SUCCESS'){
+					//no need
+				}else{
+					//no need
+				}
+			}
+		});	
+	}	
+	/*-------------------------------------------------------------*/
+
+
+	function toEther(_val) {
+		_val = String(_val);
+
+		return web3.utils.fromWei(_val, "ether");
+	}
+
+	function toWei(_val) {
+
+		_val = String(_val);
+		return web3.utils.toWei(_val, "ether");
+	}
+
+	function toEtherCustom(_val,_decimal){
+		_val = _val / 10 ** _decimal;
+		return _val;
+	}
+
+	function toWeiCustom(_val,_decimal){
+		_val = _val * 10 ** _decimal;
+		_val = scientificToDecimal(_val);
+		return _val;
+	}
+
+	function scientificToDecimal(num) {
+        const sign = Math.sign(num);
+        //if the number is in scientific notation remove it
+        if(/\d+\.?\d*e[\+\-]*\d+/i.test(num)) {
+            const zero = '0';
+            const parts = String(num).toLowerCase().split('e'); //split into coeff and exponent
+            const e = parts.pop(); //store the exponential part
+            let l = Math.abs(e); //get the number of zeros
+            const direction = e/l; // use to determine the zeroes on the left or right
+            const coeff_array = parts[0].split('.');
+            
+            if (direction === -1) {
+                coeff_array[0] = Math.abs(coeff_array[0]);
+                num = zero + '.' + new Array(l).join(zero) + coeff_array.join('');
+            }
+            else {
+                const dec = coeff_array[1];
+                if (dec) l = l - dec.length;
+                num = coeff_array.join('') + new Array(l+1).join(zero);
+            }
+        }
+        
+        if (sign < 0) {
+            num = -num;
+        }
+
+        return num;
+    }
+	
+
+    function getEtherScanUrl()
+	{
+		return $("meta[name=eth_tx_url]").attr('content').trim()
+	}
+
+	function txHashUpdateInDatabase(_table_name,_module_name,_data_id,_hash){
+		$.ajax({
+			url:SITE_URL+'/common/tx_hash_update',
+			type:'POST',
+			data:{_token:csrf_token,
+				  table_name:_table_name,
+				  module_name:_module_name,
+				  data_id:_data_id,
+				  hash:_hash},
+			dataType:'json',
+			success:function(response){
+				if(response.status=='SUCCESS'){
+
+				}
+				else{
+					
+				}
+			}	 
+		})
+	}
+
+	function checkUserSufficentTokenBalance(_fee){
+		var _fee = _fee || 0;
+
+		var msg = 'Your token balance is less than Fee, Please add sufficient tokens. <a href="'+SITE_URL+'/my_tokens'+'" target="_blank">Click Here to add Tokens</a>';
+
+		if(_fee!=0){
+			if(parseInt(userTokenBalance) < parseInt(_fee)){
+				swal("Error",msg,"error");
+			}
+			else{
+				return true;
+			}
+		}
+		else{
+			swal("Error","Please provide fee","error");
+		}
+	}
+
+	function errorAlert(msg,btnTitle,extra){
+		var msg = msg || "Please try again";
+		var btnTitle = btnTitle || "Ok";
+		var extra = extra || false;
+
+		$(".error-messege-cmn").html(msg);
+		$("#commonErrorOk").html(btnTitle);
+
+		$("#commonErrorOk").on("click",function(){
+			if(extra=="METAMASK_OPEN"){
+				window.ethereum.enable();
+			}else{
+          		window.location.reload();
+          	}	
+        });
+
+        $(".resbloc-commen-modal").slideDown();
+	}
